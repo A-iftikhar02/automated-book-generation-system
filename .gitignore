@@ -1,0 +1,20 @@
+# Python bytecode
+__pycache__/
+*.pyc
+
+# Virtual environment
+.venv/
+env/
+venv/
+
+# Environment secrets
+.env
+
+# System files
+.DS_Store
+Thumbs.db
+
+# Project-specific ignores
+outputs/
+data/
+*.log
