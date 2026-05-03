@@ -8,6 +8,8 @@ def create_book(title: str, notes_on_outline_before: str = "") -> Dict[str, Any]
         "status": "outline_phase",
         "notes_on_outline_before": notes_on_outline_before
     }).execute()
+    if not response.data:
+        raise Exception("Failed to create book: No data returned from Supabase.")
     return response.data[0]
 
 def create_outline(book_id: str, outline_text: str, status_outline_notes: str = "pending_review", version: int = 1, notes_on_outline_after: str | None = None) -> Dict[str, Any]:
@@ -19,6 +21,8 @@ def create_outline(book_id: str, outline_text: str, status_outline_notes: str = 
         "version": version,
         "notes_on_outline_after": notes_on_outline_after
     }).execute()
+    if not response.data:
+        raise Exception("Failed to create outline: No data returned from Supabase.")
     return response.data[0]
 
 def get_book_by_id(book_id: str) -> Optional[Dict[str, Any]]:

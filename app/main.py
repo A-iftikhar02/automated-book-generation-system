@@ -1,7 +1,10 @@
 import os
 import io
 import csv
+from pathlib import Path
 from fastapi import FastAPI, HTTPException, UploadFile, File
+from fastapi.responses import FileResponse
+from fastapi.middleware.cors import CORSMiddleware
 from .config import settings
 from .models import schemas
 from .db import queries
@@ -9,11 +12,21 @@ from .utils import helpers
 from .utils.events import log_event
 from .services import llm_service
 from .services.notification_service import send_notification
+from .utils.pdf_generator import generate_pdf_from_data
 
 app = FastAPI(
     title=settings.PROJECT_NAME,
     version=settings.VERSION,
     description="Backend API for the AI-assisted book generation workflow (Supabase-integrated)."
+)
+
+# Allow CORS for Next.js frontend
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:3000", "http://localhost:3001", "http://127.0.0.1:3000"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
 @app.get("/")
@@ -30,6 +43,42 @@ async def root():
 async def health():
     """Simple health check endpoint."""
     return {"status": "ok"}
+
+@app.get("/books")
+async def get_books():
+    """Retrieve all books."""
+    try:
+        response = queries.supabase.table("books").select("*").order("created_at", desc=True).execute()
+        return response.data
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/books/{book_id}")
+async def get_book_details(book_id: str):
+    """Retrieve full details of a specific book, including outline, chapters, and final draft."""
+    try:
+        book = queries.get_book_by_id(book_id)
+        if not book:
+            raise HTTPException(status_code=404, detail="Book not found")
+        
+        outline = queries.get_latest_outline_by_book_id(book_id)
+        chapters = queries.get_chapters_by_book_id(book_id)
+        final_draft = queries.get_final_draft_by_book_id(book_id)
+        
+        return {
+            "book": book,
+            "outline": outline,
+            "chapters": chapters,
+            "finalDraft": final_draft
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/outline/generate", response_model=schemas.OutlineGenerateResponse)
 async def generate_outline(request: schemas.OutlineGenerateRequest):
@@ -70,6 +119,8 @@ async def generate_outline(request: schemas.OutlineGenerateRequest):
         send_notification(f"⚠️ Workflow blocked or error occurred: {str(ai_error)}")
         raise HTTPException(status_code=502, detail=str(ai_error))
     except Exception as e:
+        import traceback
+        traceback.print_exc()
         send_notification(f"⚠️ Workflow blocked or error occurred: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Database or System error: {str(e)}")
 
@@ -558,3 +609,70 @@ async def compile_book(request: schemas.CompileBookRequest):
     except Exception as e:
         send_notification(f"⚠️ Workflow blocked or error occurred: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Final compilation execution error: {str(e)}")
+
+@app.get("/api/v1/books/{book_id}/download")
+async def download_book(book_id: str):
+    book_record = queries.get_book_by_id(book_id)
+    if not book_record:
+        raise HTTPException(status_code=404, detail="Book not found")
+        
+    final_draft = queries.get_final_draft_by_book_id(book_id)
+    if not final_draft or not final_draft.get("output_file_path"):
+        raise HTTPException(status_code=404, detail="Compiled file not found")
+        
+    file_path = Path(final_draft["output_file_path"])
+    
+    if not file_path.exists():
+        raise HTTPException(status_code=404, detail="Output file does not exist")
+        
+    # Determine media type
+    media_type = "application/octet-stream"
+    if file_path.suffix == ".txt":
+        media_type = "text/plain"
+    elif file_path.suffix == ".pdf":
+        media_type = "application/pdf"
+    elif file_path.suffix == ".docx":
+        media_type = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+
+    return FileResponse(
+        path=file_path,
+        filename=file_path.name,
+        media_type=media_type
+    )
+
+@app.get("/api/v1/books/{book_id}/download/pdf")
+async def download_book_pdf(book_id: str):
+    book_record = queries.get_book_by_id(book_id)
+    if not book_record:
+        raise HTTPException(status_code=404, detail="Book not found")
+        
+    final_draft = queries.get_final_draft_by_book_id(book_id)
+    if not final_draft or not final_draft.get("output_file_path"):
+        raise HTTPException(status_code=404, detail="Compiled TXT file not found")
+        
+    txt_path = Path(final_draft["output_file_path"])
+    pdf_path = txt_path.with_suffix(".pdf")
+    
+    if not txt_path.exists():
+        raise HTTPException(status_code=404, detail="TXT output file does not exist")
+        
+    if not pdf_path.exists():
+        try:
+            chapters = queries.get_chapters_by_book_id(book_id)
+            # Only use approved chapters, or all if we don't care. 
+            # The prompt says "approved chapters from database" but compile_book already aggregated them. 
+            # So `get_chapters_by_book_id` gets them ordered.
+            generate_pdf_from_data(
+                book=book_record,
+                chapters=chapters,
+                output_path=str(pdf_path)
+            )
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"Failed to generate PDF: {str(e)}")
+
+    return FileResponse(
+        path=pdf_path,
+        filename=pdf_path.name,
+        media_type="application/pdf"
+    )
+

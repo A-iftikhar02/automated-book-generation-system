@@ -1,8 +1,9 @@
 fastapi
-uvicorn
+uvicorn[standard]
 python-dotenv
-supabase
-google-genai
 pydantic
 python-multipart
 requests
+supabase
+google-genai
+reportlab
