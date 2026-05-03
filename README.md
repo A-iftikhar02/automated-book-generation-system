@@ -62,13 +62,7 @@ Approved chapters are aggregated into a final manuscript.
 **Step 7: Download TXT / PDF**
 The compiled manuscript is available for export as a clean plain-text file or a polished, publish-ready PDF.
 
-## Screenshots
 
-![Dashboard](./screenshots/dashboard.png)
-![Create Book](./screenshots/create-book.png)
-![Outline Review](./screenshots/outline-review.png)
-![Chapter Generation](./screenshots/chapter-generation.png)
-![Final Draft](./screenshots/final-draft.png)
 
 ## Setup Instructions
 
