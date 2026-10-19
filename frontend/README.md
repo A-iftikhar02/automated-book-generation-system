@@ -1,45 +1,40 @@
-# Agentic Book Generator - Frontend
+# BookPilot frontend
 
-This is a Next.js frontend for the FastAPI-based Automated Book Generation System. It provides a clean, responsive admin/editor dashboard for human-in-the-loop book generation.
+Next.js 16 (App Router, Turbopack) + React 19 + Tailwind CSS 4 UI for the BookPilot FastAPI backend.
+Plan → outline review → writing → QA → publishing, with a human in the loop at every step.
 
-## Stack
-- Next.js 15 (App Router)
-- TypeScript
-- Tailwind CSS
-- Axios
+## Run locally
 
-## Setup Instructions
+```bash
+cd frontend
+npm install
+NEXT_PUBLIC_API_URL=http://localhost:8000 npm run dev   # http://localhost:3000
+```
 
-1. **Prerequisites**: Ensure you have Node.js (v18+) and npm installed.
-2. **Install Dependencies**:
-   ```bash
-   cd frontend
-   npm install
-   ```
-3. **Environment Variables**:
-   By default, the `.env.local` file points to the local backend:
-   ```env
-   NEXT_PUBLIC_API_URL=http://localhost:8000
-   ```
-4. **Run the Development Server**:
-   ```bash
-   npm run dev
-   ```
-5. **Access the App**: Open [http://localhost:3000](http://localhost:3000) in your browser.
+`NEXT_PUBLIC_API_URL` defaults to `http://localhost:8000`. The backend must allow the frontend origin
+(`CORS_ORIGINS` in the backend `.env`). AI actions return the backend's message (e.g. "OPENROUTER_API_KEY is not set")
+as a toast when OpenRouter isn't configured; QA without AI, auto-fix, typographic covers and exports still work.
 
-## Integration Notes
+```bash
+npm run lint
+npm run build && npm start
+```
 
-### Missing Backend Endpoints (TODO)
-During the creation of the frontend, the following backend endpoints were identified as missing and have been **mocked** in `src/lib/api.ts` so the frontend doesn't break:
-- `GET /books`: To list all books on the dashboard.
-- `GET /books/{id}`: To get the full details of a book, its outline, chapters, and final draft status.
+## Docker
 
-Please implement these missing GET endpoints in the FastAPI backend (`app/main.py`) to serve real data to the dashboard.
+```bash
+docker build --build-arg NEXT_PUBLIC_API_URL=http://localhost:8000 -t bookpilot-frontend .
+docker run -p 3000:3000 bookpilot-frontend
+```
 
-### CORS Configuration
-CORS has been added to the FastAPI backend (`app/main.py`) to allow requests from `http://localhost:3000`. If you run the frontend on a different port, update the `allow_origins` array in `app/main.py`.
+`NEXT_PUBLIC_API_URL` is inlined at build time, so rebuild the image to point it at a different API. The image uses
+`output: "standalone"` and runs `node server.js`. `docker compose up` from the repo root builds it as the `frontend` service.
 
-## Pages
-- `/`: Dashboard showing the list of generated books.
-- `/books/new`: Page to start a new book generation by submitting title and initial notes.
-- `/books/[id]`: Detail page for a specific book showing Outline Review, Chapter Generation, and Final Compilation phases.
+## Layout
+
+- `src/app/` – routes: `/` dashboard, `/books` library, `/books/new` wizard, `/books/[id]` workspace, `/settings`
+- `src/lib/api.ts` – typed API client (types mirror `app/schemas.py`), `paths` doubles as SWR keys
+- `src/lib/hooks.ts` – SWR data hooks (job-aware polling), `useAction` (pending state + error toasts)
+- `src/components/book/` – workspace tabs: Overview, Outline, Manuscript, Quality, Publish, Export
+- `src/components/wizard/` – new book wizard steps
+- `src/components/ui/` – small primitives (button, dialog, tabs, toast…)

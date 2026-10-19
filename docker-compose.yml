@@ -1,0 +1,91 @@
+name: bookpilot
+
+services:
+  db:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: bookpilot
+      POSTGRES_PASSWORD: bookpilot
+      POSTGRES_DB: bookpilot
+    ports:
+      - "${POSTGRES_PORT:-5442}:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U bookpilot -d bookpilot"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+  # Self-hosted grammar/spelling checker used by the QA pipeline.
+  languagetool:
+    image: erikvl87/languagetool:latest
+    environment:
+      Java_Xms: 512m
+      Java_Xmx: 1536m
+    ports:
+      - "${LANGUAGETOOL_PORT:-8010}:8010"
+    restart: unless-stopped
+
+  api:
+    build: .
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      DATABASE_URL: postgresql+psycopg://bookpilot:bookpilot@db:5432/bookpilot
+      LANGUAGETOOL_URL: http://languagetool:8010
+      STORAGE_DIR: /data/storage
+      EPUBCHECK_JAR: /opt/epubcheck/epubcheck.jar
+      # Ollama runs on the host machine, not in Docker.
+      OLLAMA_BASE_URL: ${OLLAMA_DOCKER_BASE_URL:-http://host.docker.internal:11434}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    command: sh -c "alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port 8000"
+    ports:
+      - "8000:8000"
+    volumes:
+      - storage:/data/storage
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: unless-stopped
+
+  worker:
+    build: .
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      DATABASE_URL: postgresql+psycopg://bookpilot:bookpilot@db:5432/bookpilot
+      LANGUAGETOOL_URL: http://languagetool:8010
+      STORAGE_DIR: /data/storage
+      EPUBCHECK_JAR: /opt/epubcheck/epubcheck.jar
+      OLLAMA_BASE_URL: ${OLLAMA_DOCKER_BASE_URL:-http://host.docker.internal:11434}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    command: python -m app.worker
+    volumes:
+      - storage:/data/storage
+    depends_on:
+      db:
+        condition: service_healthy
+      api:
+        condition: service_started
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: ./frontend
+      args:
+        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:8000}
+    ports:
+      - "3000:3000"
+    depends_on:
+      - api
+    restart: unless-stopped
+
+volumes:
+  pgdata:
+  storage:

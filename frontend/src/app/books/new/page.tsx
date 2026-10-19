@@ -2,144 +2,158 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { generateOutline } from "@/lib/api";
-import { Card, CardContent, CardHeader, CardTitle, CardDescription, CardFooter } from "@/components/ui/card";
+import { useSWRConfig } from "swr";
+import { ArrowLeft, ArrowRight, Check, Sparkles } from "lucide-react";
+import { api, errorMessage, paths, type Category } from "@/lib/api";
+import { useAction, useCatalog } from "@/lib/hooks";
+import { PageHeader } from "@/components/PageHeader";
+import { SetupBanner } from "@/components/SetupBanner";
+import { CategoryStep } from "@/components/wizard/CategoryStep";
+import { DetailsStep } from "@/components/wizard/DetailsStep";
+import { StoryStep } from "@/components/wizard/StoryStep";
+import { INITIAL, type SetField, type WizardState } from "@/components/wizard/types";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { Textarea } from "@/components/ui/textarea";
+import { Card } from "@/components/ui/card";
+import { EmptyState } from "@/components/ui/empty";
+import { Skeleton } from "@/components/ui/skeleton";
+import { cn } from "@/lib/utils";
 
-import { Loader2, Sparkles, AlertCircle } from "lucide-react";
+const STEPS = ["Format", "Genre & audience", "Story & settings"];
 
-import { BookOpen } from "lucide-react";
-
-export default function CreateBook() {
+export default function NewBookPage() {
   const router = useRouter();
-  const [title, setTitle] = useState("");
-  const [notes, setNotes] = useState("");
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState("");
+  const { mutate } = useSWRConfig();
+  const { data: catalog, error, isLoading } = useCatalog();
+  const { run, busy } = useAction();
+  const [step, setStep] = useState(0);
+  const [state, setState] = useState<WizardState>(INITIAL);
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!title || !notes) {
-      setError("Please provide both a title and notes.");
-      return;
-    }
-    
-    setLoading(true);
-    setError("");
-    try {
-      const result = await generateOutline(title, notes);
-      if (result.book_id) {
-        router.push(`/books/${result.book_id}`);
-      }
-    } catch (err: unknown) {
-      const error = err as { response?: { data?: { detail?: string } }, message?: string };
-      setError(error.response?.data?.detail || error.message || "Failed to generate outline.");
-      setLoading(false);
+  const set: SetField = (key, value) => setState((s) => ({ ...s, [key]: value }));
+  const category = catalog?.categories.find((c) => c.key === state.category);
+
+  const selectCategory = (c: Category) => {
+    setState((s) => {
+      const genres = c.fiction ? catalog!.fiction_genres : catalog!.nonfiction_genres;
+      return {
+        ...s,
+        category: c.key,
+        genre: s.genre in genres ? s.genre : "",
+        audience: c.allowed_audiences.includes(s.audience) ? s.audience : c.allowed_audiences.includes("adult") ? "adult" : c.allowed_audiences[0],
+        target_word_count: c.default_words,
+        target_chapter_count: c.default_parts,
+      };
+    });
+  };
+
+  const valid = [
+    !!category,
+    !!state.genre && !!state.audience,
+    state.title.trim().length > 0 &&
+      state.premise.trim().length >= 20 &&
+      !!category &&
+      state.target_chapter_count >= category.min_parts &&
+      state.target_chapter_count <= category.max_parts,
+  ];
+
+  const submit = async () => {
+    if (!category) return;
+    const book = await run("create", () =>
+      api.createBook({
+        title: state.title.trim(),
+        subtitle: state.subtitle.trim() || null,
+        author_name: state.author_name.trim(),
+        category: state.category,
+        genre: state.genre,
+        audience: state.audience,
+        content_rating: state.content_rating,
+        ...(category.fiction ? { pov: state.pov, tense: state.tense } : {}),
+        tone: state.tone.trim() || null,
+        premise: state.premise.trim(),
+        style_notes: state.style_notes.trim() || null,
+        target_word_count: state.target_word_count,
+        target_chapter_count: state.target_chapter_count,
+        review_mode: state.review_mode,
+        writer_model: state.writer_model || null,
+        editor_model: state.editor_model || null,
+      }),
+      "Book created. Planning has started.",
+    );
+    if (book) {
+      mutate(paths.books);
+      router.push(`/books/${book.id}`);
     }
   };
 
   return (
-    <div className="max-w-7xl mx-auto space-y-8">
-      <div className="mb-10 text-center max-w-2xl mx-auto pt-4">
-        <div className="w-16 h-16 bg-gradient-to-br from-blue-100 to-indigo-100 rounded-2xl flex items-center justify-center mx-auto mb-6 shadow-inner border border-blue-200/50">
-          <BookOpen className="w-8 h-8 text-blue-600" />
-        </div>
-        <h1 className="text-3xl md:text-4xl font-bold tracking-tight text-slate-900 mb-4">Create a New AI Book</h1>
-        <p className="text-slate-500 text-lg">Provide direction once, then control outline, chapter, and final draft generation through review gates.</p>
-      </div>
+    <div className="mx-auto max-w-5xl">
+      <PageHeader title="New book" description="Choose a format, set the direction, and BookPilot will plan an outline for your review." />
+      <SetupBanner compact />
 
-      <div className="grid lg:grid-cols-[1fr_300px] gap-8 max-w-5xl mx-auto items-start">
-        <Card className="border-slate-200 shadow-xl rounded-3xl bg-white/95 backdrop-blur overflow-hidden">
-          <div className="h-2 w-full bg-gradient-to-r from-blue-600 to-indigo-600" />
-          <CardHeader className="pb-4 border-b border-slate-100 px-8 pt-8">
-            <CardTitle className="text-2xl font-bold text-slate-900 flex items-center gap-2">
-              <Sparkles className="w-5 h-5 text-indigo-500" />
-              Book Configuration
-            </CardTitle>
-            <CardDescription className="text-base mt-1">
-              Define the core concept and AI will generate a structured outline.
-            </CardDescription>
-          </CardHeader>
-          <form onSubmit={handleSubmit}>
-            <CardContent className="space-y-6 pt-8 px-8">
-              {error && (
-                <div className="flex items-start gap-3 p-4 bg-red-50 text-red-700 rounded-xl text-sm border border-red-200">
-                  <AlertCircle className="w-5 h-5 shrink-0 mt-0.5" />
-                  <div className="font-medium">{error}</div>
-                </div>
-              )}
-              
-              <div className="space-y-2.5">
-                <Label htmlFor="title" className="text-slate-700 font-semibold text-sm">Book Title</Label>
-                <Input
-                  id="title"
-                  placeholder="e.g. The Art of Agentic AI"
-                  value={title}
-                  onChange={(e) => setTitle(e.target.value)}
-                  disabled={loading}
-                  className="max-w-md rounded-xl bg-slate-50 border-slate-200 h-11 focus-visible:ring-blue-500"
-                />
-              </div>
-              
-              <div className="space-y-2.5">
-                <Label htmlFor="notes" className="text-slate-700 font-semibold text-sm">Direction & Notes for Outline</Label>
-                <Textarea
-                  id="notes"
-                  placeholder="Describe the target audience, tone, key themes, and overall structure you want..."
-                  rows={6}
-                  value={notes}
-                  onChange={(e) => setNotes(e.target.value)}
-                  disabled={loading}
-                  className="resize-y rounded-xl bg-slate-50 border-slate-200 p-4 focus-visible:ring-blue-500"
-                />
-              </div>
-            </CardContent>
-            <CardFooter className="bg-slate-50/50 p-8 border-t border-slate-100 flex justify-end">
-              <Button 
-                type="submit" 
-                disabled={loading} 
-                className="w-full sm:w-auto bg-gradient-to-r from-blue-600 to-indigo-600 hover:opacity-90 text-white shadow-md hover:shadow-lg transition-all rounded-xl h-12 px-8 font-semibold text-base border-0"
-              >
-                {loading ? (
-                  <Loader2 className="mr-2 h-5 w-5 animate-spin" />
-                ) : (
-                  <Sparkles className="mr-2 h-5 w-5" />
+      <ol className="mb-6 flex flex-wrap gap-2" aria-label="Steps">
+        {STEPS.map((s, i) => {
+          const done = i < step;
+          const current = i === step;
+          const reachable = i <= step || valid.slice(0, i).every(Boolean);
+          return (
+            <li key={s}>
+              <button
+                type="button"
+                onClick={() => reachable && setStep(i)}
+                disabled={!reachable}
+                aria-current={current ? "step" : undefined}
+                className={cn(
+                  "flex items-center gap-2 rounded-full border px-3 py-1.5 text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 disabled:cursor-not-allowed",
+                  current ? "border-blue-600 bg-blue-600 text-white" : done ? "border-blue-200 bg-blue-50 text-blue-700" : "border-slate-200 bg-white text-slate-500",
                 )}
-                {loading ? "Generating Outline..." : "Create Book & Generate Outline"}
-              </Button>
-            </CardFooter>
-          </form>
-        </Card>
+              >
+                <span className={cn("flex h-5 w-5 items-center justify-center rounded-full text-xs", current ? "bg-white/20" : "bg-slate-100")}>
+                  {done ? <Check className="h-3 w-3" /> : i + 1}
+                </span>
+                {s}
+              </button>
+            </li>
+          );
+        })}
+      </ol>
 
-        <Card className="border-slate-200 shadow-sm rounded-2xl bg-gradient-to-br from-indigo-50 to-blue-50/50 sticky top-8">
-          <CardContent className="p-6">
-            <h3 className="font-bold text-indigo-900 mb-3 flex items-center gap-2">
-              <BookOpen className="w-4 h-4 text-indigo-600" />
-              Pro Tips
-            </h3>
-            <p className="text-sm text-indigo-800/80 leading-relaxed">
-              Better prompts lead to better books. When writing your direction, be sure to include:
-            </p>
-            <ul className="mt-4 space-y-3">
-              <li className="flex items-start gap-2 text-sm text-indigo-900 font-medium">
-                <div className="w-1.5 h-1.5 rounded-full bg-indigo-400 mt-1.5 shrink-0" />
-                Target audience
-              </li>
-              <li className="flex items-start gap-2 text-sm text-indigo-900 font-medium">
-                <div className="w-1.5 h-1.5 rounded-full bg-indigo-400 mt-1.5 shrink-0" />
-                Desired tone (e.g. professional, conversational)
-              </li>
-              <li className="flex items-start gap-2 text-sm text-indigo-900 font-medium">
-                <div className="w-1.5 h-1.5 rounded-full bg-indigo-400 mt-1.5 shrink-0" />
-                Key themes or chapters you absolutely need
-              </li>
-            </ul>
-          </CardContent>
-        </Card>
-      </div>
+      {error ? (
+        <EmptyState title="Could not load the catalog">{errorMessage(error)}</EmptyState>
+      ) : isLoading || !catalog ? (
+        <Skeleton className="h-96" />
+      ) : (
+        <form
+          onKeyDown={(e) => {
+            // Enter in a text field (e.g. the model search) shouldn't submit the wizard.
+            if (e.key === "Enter" && (e.target as HTMLElement).tagName === "INPUT") e.preventDefault();
+          }}
+          onSubmit={(e) => {
+            e.preventDefault();
+            if (step < 2 && valid[step]) setStep(step + 1);
+            else if (step === 2 && valid.every(Boolean)) submit();
+          }}
+        >
+          <Card className="p-4 sm:p-6">
+            {step === 0 && <CategoryStep categories={catalog.categories} value={state.category} onSelect={selectCategory} />}
+            {step === 1 && category && <DetailsStep catalog={catalog} category={category} state={state} set={set} />}
+            {step === 2 && category && <StoryStep category={category} state={state} set={set} />}
+          </Card>
+
+          <div className="mt-6 flex items-center justify-between gap-3">
+            <Button type="button" variant="outline" onClick={() => setStep((s) => s - 1)} disabled={step === 0 || busy}>
+              <ArrowLeft className="h-4 w-4" /> Back
+            </Button>
+            {step < 2 ? (
+              <Button type="submit" disabled={!valid[step]}>
+                Continue <ArrowRight className="h-4 w-4" />
+              </Button>
+            ) : (
+              <Button type="submit" disabled={!valid.every(Boolean)} loading={busy}>
+                {!busy && <Sparkles className="h-4 w-4" />} Create & plan book
+              </Button>
+            )}
+          </div>
+        </form>
+      )}
     </div>
   );
 }

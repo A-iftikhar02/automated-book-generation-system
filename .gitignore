@@ -1,20 +1,25 @@
-# Python bytecode
+# Python
 __pycache__/
 *.pyc
+.pytest_cache/
 
-# Virtual environment
+# Virtual environments
 .venv/
 env/
 venv/
 
-# Environment secrets
+# Secrets
 .env
+
+# Generated books, covers and exports
+storage/
+outputs/
 
 # System files
 .DS_Store
 Thumbs.db
-
-# Project-specific ignores
-outputs/
-data/
 *.log
+
+# Backups (contain your books, and API keys with --with-env)
+backups/
+.env.from-backup
